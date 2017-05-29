@@ -19,7 +19,8 @@ type Frame struct {
 }
 
 const (
-	LCD_ADDR = 0x0a194005
+	RDS_ADDR = 0x0a194005
+	RDS_CHAR_COUNT = 8
 )
 
 func parseFrame(l string) Frame {
@@ -79,35 +80,36 @@ func reader() {
 	}
 }
 
-func decodeLcd(data []byte) string {
+func findFrame(addr uint32, callback func(Frame)) {
+	for _, frame := range frames.m {
+		if frame.addr != addr {
+			continue
+		}
+		callback(frame)
+	}
+}
+
+func decodeLcd(frame Frame) string {
+	data := frame.data
 	text := ""
 	var ch uint
-	for i:=0; i<6*6; i++ {
-		bit := data[i/8] & (0x80 >> uint(i%8))
-		if bit != 0 {
-			ch = ch | 1
-		}
-		ch = ch << 1
+	for i:=0; i<6*RDS_CHAR_COUNT; i++ {
 		if i != 0 && (i % 6 == 0) {
-			text += string('A' + ((ch>>1) - 12))
+			if ch >= 12 && ch <= 12 + 25 {
+				text += string('A' + ch - 12)
+			} else if ch == 40 {
+				text += string(' ')
+			} else {
+				text += string(' ')
+			}
 			ch = 0
 		}
-	}
-/*	z := new(big.Int)
-	z.SetBytes(data)
-	for i := 8; i>=2; i-- {
-		var ch uint 
-		ch = 0
-		for c := 5; c>=0; c-- {
-			ch = (ch<<1) | z.Bit(i*6+c)
+		bit := data[i/8] & (0x80 >> uint(i%8))
+		ch <<= 1
+		if bit != 0 {
+			ch |= 1
 		}
-		text += string('A' + ch - 0x0c)
-	}*/
-/*	hex1 := ((data[0] & 0xfc) >> 2)
-	hex2 := ((((data[0] << 6) | (data[1] >> 2)) & 0xfc) >> 2)
-	text := ""
-	text += string('A' + hex1 - 0x0c)
-	text += string('A' + hex2 - 0x0c) */
+	}
 	return text
 }
 
@@ -162,15 +164,7 @@ func render() {
 		}
 		frames.RUnlock()
 
-	
-		// DECODE LCD
-		for _, frame := range frames.m {
-			if frame.addr != LCD_ADDR {
-				continue
-			}
-			lcd.Text = decodeLcd(frame.data)
-		}	
-		
+		findFrame(RDS_ADDR, decodeLcd)
 
 		list.Items = strs
 		termui.Body.Align()
