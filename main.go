@@ -9,7 +9,6 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"time"
 )
 
 type Frame struct {
@@ -58,12 +57,14 @@ var frames = struct {
 	m []Frame
 }{}
 
-func reader() {
+var status string
+
+func reader(mutex chan bool) {
 	reader := bufio.NewReader(os.Stdin)
 	for {
 		l, err := reader.ReadString('\n')
 		if err != nil {
-
+			status = "!!!EOF!!!"
 			break
 		}
 		frame := parseFrameDump(l)
@@ -80,7 +81,6 @@ func reader() {
 			frames.m = append(frames.m, frame)
 		}
 		frames.Unlock()
-		time.Sleep(time.Millisecond * 20)
 	}
 }
 
@@ -165,8 +165,8 @@ func decodeBreak(data []byte) string {
 	return ""
 }
 
-func render() {
-	title := termui.NewPar("canshow, Author: Jakub Czekanski")
+func render(mutex chan bool) {
+	title := termui.NewPar("")
 	title.Height = 3
 	title.BorderLabel = "Info"
 
@@ -249,12 +249,13 @@ func render() {
 			}
 		}
 
+		title.Text = "canshow, Author: Jakub Czekanski  " + status
+
 		lcd.Text = lcdRds + " " + lcdFreq
 
 		list.Items = strs
 		termui.Body.Align()
 		termui.Render(termui.Body)
-		time.Sleep(time.Millisecond * 20)
 	}
 }
 
@@ -265,8 +266,9 @@ func main() {
 	}
 	defer termui.Close()
 
-	go reader()
-	go render()
+	mutex := make(chan bool)
+	go reader(mutex)
+	go render(mutex)
 
 	termui.Handle("/sys/kbd/q", func(termui.Event) {
 		termui.StopLoop()
