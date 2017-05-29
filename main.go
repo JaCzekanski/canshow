@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"encoding/hex"
 )
 
 type Frame struct {
@@ -16,6 +17,10 @@ type Frame struct {
 	data     []byte
 	prevData []byte
 }
+
+const (
+	LCD_ADDR = 0x0a194005
+)
 
 func parseFrame(l string) Frame {
 	var frame Frame
@@ -31,6 +36,18 @@ func parseFrame(l string) Frame {
 	return frame
 }
 
+func parseFrameDump(l string) Frame {
+	var frame Frame
+	p := strings.Fields(l)
+	xx := strings.Split(p[2], "#")
+	addr, _ := strconv.ParseUint(xx[0], 16, 32)
+	frame.addr = uint32(addr)
+	bytes, _ := hex.DecodeString(xx[1])
+	frame.data = bytes
+	frame.prevData = bytes
+	return frame
+}
+
 var frames = struct {
 	sync.RWMutex
 	m []Frame
@@ -41,9 +58,10 @@ func reader() {
 	for {
 		l, err := reader.ReadString('\n')
 		if err != nil {
+
 			break
 		}
-		frame := parseFrame(l)
+		frame := parseFrameDump(l)
 		frames.Lock()
 		found := false
 		for idx, _ := range frames.m {
@@ -57,8 +75,40 @@ func reader() {
 			frames.m = append(frames.m, frame)
 		}
 		frames.Unlock()
-		//time.Sleep(time.Millisecond * 20)
+		time.Sleep(time.Millisecond * 20)
 	}
+}
+
+func decodeLcd(data []byte) string {
+	text := ""
+	var ch uint
+	for i:=0; i<6*6; i++ {
+		bit := data[i/8] & (0x80 >> uint(i%8))
+		if bit != 0 {
+			ch = ch | 1
+		}
+		ch = ch << 1
+		if i != 0 && (i % 6 == 0) {
+			text += string('A' + ((ch>>1) - 12))
+			ch = 0
+		}
+	}
+/*	z := new(big.Int)
+	z.SetBytes(data)
+	for i := 8; i>=2; i-- {
+		var ch uint 
+		ch = 0
+		for c := 5; c>=0; c-- {
+			ch = (ch<<1) | z.Bit(i*6+c)
+		}
+		text += string('A' + ch - 0x0c)
+	}*/
+/*	hex1 := ((data[0] & 0xfc) >> 2)
+	hex2 := ((((data[0] << 6) | (data[1] >> 2)) & 0xfc) >> 2)
+	text := ""
+	text += string('A' + hex1 - 0x0c)
+	text += string('A' + hex2 - 0x0c) */
+	return text
 }
 
 func render() {
@@ -70,8 +120,13 @@ func render() {
 	list.BorderLabel = "Frames"
 	list.Height = 40
 
+	lcd := termui.NewPar("---")
+	lcd.Height = 3
+	lcd.BorderLabel = "LCD"
+
 	termui.Body.AddRows(
 		termui.NewRow(termui.NewCol(6, 0, title)),
+		termui.NewRow(termui.NewCol(3, 0, lcd)),
 		termui.NewRow(termui.NewCol(10, 0, list)))
 	var strs []string
 	for {
@@ -106,6 +161,16 @@ func render() {
 			strs = append(strs, line)
 		}
 		frames.RUnlock()
+
+	
+		// DECODE LCD
+		for _, frame := range frames.m {
+			if frame.addr != LCD_ADDR {
+				continue
+			}
+			lcd.Text = decodeLcd(frame.data)
+		}	
+		
 
 		list.Items = strs
 		termui.Body.Align()
